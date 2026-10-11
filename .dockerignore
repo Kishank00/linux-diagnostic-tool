@@ -1,0 +1,26 @@
+# Git
+.git/
+.gitignore
+
+# Python virtual environments
+.venv/
+venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Tests are run separately from the production image
+tests/
+
+# Secrets and local configuration
+.env
+.env.*
+
+# Local databases and logs
+*.db
+*.sqlite3
+*.log
