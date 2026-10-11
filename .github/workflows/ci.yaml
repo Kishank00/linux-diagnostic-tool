@@ -3,7 +3,6 @@ name: Sysdiag CI
 
 on:
   push:
-  
   pull_request:
 
 permissions:
@@ -12,6 +11,8 @@ permissions:
 jobs:
   test-and-build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout repository
@@ -33,3 +34,47 @@ jobs:
 
       - name: Build Docker image
         run: docker build -t sysdiag:ci .
+
+  publish-image:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: test-and-build
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4.3.0
+
+      - name: Set lowercase image name
+        id: image
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate image tags
+        id: meta
+        uses: docker/metadata-action@v6.2.0
+        with:
+          images: ${{ steps.image.outputs.name }}
+          tags: |
+            type=raw,value=latest
+            type=sha
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v7.4.0
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
