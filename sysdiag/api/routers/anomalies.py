@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 from sysdiag.metrics import collect_metrics
-from sysdiag.anomaly import is_cpu_high
+from aiops.detector import is_cpu_high
 
 router = APIRouter(prefix="/anomalies", tags=["anomalies"])
 

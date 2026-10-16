@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 import time
-from sysdiag.anomaly import is_cpu_high
+from aiops.detector import is_cpu_high
 
 from sysdiag.cpu import cpu_usage, load_diagnostics
 from sysdiag.memory import read_memory_info
