@@ -33,6 +33,6 @@ if __name__ == "__main__":
     while True:
         snapshot = collect_metrics()
         print("High CPU:", is_cpu_high(snapshot))
-        append_snapshot(snapshot, "data/metrics.csv")
+        append_snapshot(snapshot, "data/metrics-baseline.csv")
         print(snapshot)
         time.sleep(10)

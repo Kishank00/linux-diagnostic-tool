@@ -1,0 +1,5 @@
+timestamp,cpu_usage_percent,memory_usage_percent,high_cpu,high_memory,ml_anomaly
+2026-10-17T07:35:39.072767+00:00,3.56,17.56,False,False,False
+2026-10-17T07:35:56.046811+00:00,5.19,18.28,False,False,True
+2026-10-17T07:43:48.776143+00:00,5.64,17.39,False,False,False
+2026-10-17T08:57:57.282733+00:00,3.69,18.13,False,False,True
