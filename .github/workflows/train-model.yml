@@ -27,6 +27,9 @@ jobs:
       - name: Train candidate model
         run: uv run python -m aiops.train_model
 
+      - name: Check candidate model
+        run: uv run python -m aiops.evaluate_candidate
+
       - name: Save candidate for download
         uses: actions/upload-artifact@v7
         with:
