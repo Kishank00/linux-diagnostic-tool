@@ -1,0 +1,35 @@
+name: Train AIOps Candidate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  train-candidate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.3.0
+        with:
+          enable-cache: true
+
+      - name: Install Python
+        run: uv python install 3.12
+
+      - name: Install project dependencies
+        run: uv sync --locked --dev
+
+      - name: Train candidate model
+        run: uv run python -m aiops.train_model
+
+      - name: Save candidate for download
+        uses: actions/upload-artifact@v7
+        with:
+          name: isolation-forest-candidate
+          path: models/isolation_forest_candidate.joblib
+          if-no-files-found: error

@@ -41,6 +41,16 @@ def get_anomalies():
 
     append_snapshot(prediction_record, "data/anomaly_predictions.csv")
 
+    if ml_anomaly:
+        review_record = {
+            "timestamp": snapshot["timestamp"],
+            "cpu_usage_percent": snapshot["cpu_usage_percent"],
+            "memory_usage_percent": snapshot["memory_usage_percent"],
+            "ml_anomaly": ml_anomaly,
+            "review_status": "pending",
+        }
+        append_snapshot(review_record, "data/anomaly_reviews.csv")
+
     return {
         "snapshot": snapshot,
         "high_cpu": high_cpu,
