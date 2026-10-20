@@ -78,3 +78,58 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+  deploy-ec2:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: test-and-build
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-ec2
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::286590629524:role/github-actions-app-deploy
+          aws-region: ap-south-1
+
+      - name: Find the app server
+        id: ec2
+        run: |
+          id=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=devops-lab-dev-diagnostic" "Name=instance-state-name,Values=running" \
+            --query 'Reservations[0].Instances[0].InstanceId' --output text)
+          if [ "$id" = "None" ]; then
+            echo "No running app server found"
+            exit 1
+          fi
+          echo "Deploying to $id"
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
+      - name: Run deploy-sysdiag on the server
+        env:
+          INSTANCE_ID: ${{ steps.ec2.outputs.id }}
+        run: |
+          cid=$(aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name AWS-RunShellScript \
+            --comment "deploy ${{ github.sha }}" \
+            --parameters 'commands=["/usr/local/bin/deploy-sysdiag"]' \
+            --query Command.CommandId --output text)
+          echo "SSM command: $cid"
+
+          aws ssm wait command-executed --command-id "$cid" --instance-id "$INSTANCE_ID" || true
+
+          aws ssm get-command-invocation --command-id "$cid" --instance-id "$INSTANCE_ID" \
+            --query '[Status, StandardOutputContent, StandardErrorContent]' --output text
+
+          status=$(aws ssm get-command-invocation --command-id "$cid" --instance-id "$INSTANCE_ID" \
+            --query Status --output text)
+          [ "$status" = "Success" ]
+
+
+
