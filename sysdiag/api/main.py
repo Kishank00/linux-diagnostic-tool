@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from .routers import health, cpu, memory, process, disk, anomalies
 
-app = FastAPI(title="Linux Diagnostic Tool API")
+app = FastAPI(title="Linux Diagnostic Tool API", version="0.2.0")
 
 app.include_router(health.router)
 app.include_router(cpu.router)
