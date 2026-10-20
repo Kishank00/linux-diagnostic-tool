@@ -21,8 +21,11 @@ USER appuser
 COPY --chown=appuser:appuser pyproject.toml uv.lock ./
 RUN uv sync --locked --no-install-project --no-dev
 
-# Copy the application
+# Copy the application: the API, the anomaly-detection code it imports,
+# and the trained model it loads at startup
 COPY --chown=appuser:appuser sysdiag/ ./sysdiag/
+COPY --chown=appuser:appuser aiops/ ./aiops/
+COPY --chown=appuser:appuser models/ ./models/
 
 # Use the project's virtual environment
 ENV PATH="/app/.venv/bin:$PATH"
