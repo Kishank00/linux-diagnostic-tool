@@ -65,7 +65,6 @@ jobs:
           docker build -t "$REGISTRY/linux-diagnostic-tool:$IMAGE_TAG" .
           docker push "$REGISTRY/linux-diagnostic-tool:$IMAGE_TAG"
 
-
   deploy-ec2:
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     needs: test-and-build
@@ -170,6 +169,11 @@ jobs:
             --query Status --output text)
           [ "$status" = "Success" ]
 
-
-
-
+      - name: Record the live image tag
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          aws ssm put-parameter \
+            --name /devops-lab-dev/sysdiag/image-tag \
+            --value "$IMAGE_TAG" \
+            --overwrite
