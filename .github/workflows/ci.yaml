@@ -65,68 +65,21 @@ jobs:
           docker build -t "$REGISTRY/linux-diagnostic-tool:$IMAGE_TAG" .
           docker push "$REGISTRY/linux-diagnostic-tool:$IMAGE_TAG"
 
-  deploy-ec2:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-    needs: test-and-build
-    runs-on: ubuntu-latest
-    concurrency:
-      group: deploy-ec2
-      cancel-in-progress: false
-    permissions:
-      id-token: write
-      contents: read
-
-    steps:
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: arn:aws:iam::286590629524:role/github-actions-app-deploy
-          aws-region: ap-south-1
-
-      - name: Find the app server
-        id: ec2
-        run: |
-          id=$(aws ec2 describe-instances \
-            --filters "Name=tag:Name,Values=devops-lab-dev-diagnostic" "Name=instance-state-name,Values=running" \
-            --query 'Reservations[0].Instances[0].InstanceId' --output text)
-          if [ "$id" = "None" ]; then
-            echo "No running app server found"
-            exit 1
-          fi
-          echo "Deploying to $id"
-          echo "id=$id" >> "$GITHUB_OUTPUT"
-
-      - name: Run deploy-sysdiag on the server
-        env:
-          INSTANCE_ID: ${{ steps.ec2.outputs.id }}
-        run: |
-          cid=$(aws ssm send-command \
-            --instance-ids "$INSTANCE_ID" \
-            --document-name AWS-RunShellScript \
-            --comment "deploy ${{ github.sha }}" \
-            --parameters 'commands=["/usr/local/bin/deploy-sysdiag"]' \
-            --query Command.CommandId --output text)
-          echo "SSM command: $cid"
-
-          aws ssm wait command-executed --command-id "$cid" --instance-id "$INSTANCE_ID" || true
-
-          aws ssm get-command-invocation --command-id "$cid" --instance-id "$INSTANCE_ID" \
-            --query '[Status, StandardOutputContent, StandardErrorContent]' --output text
-
-          status=$(aws ssm get-command-invocation --command-id "$cid" --instance-id "$INSTANCE_ID" \
-            --query Status --output text)
-          [ "$status" = "Success" ]
-
-  deploy-ec2-docker:
+  deploy-asg:
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     needs: publish-ecr
     runs-on: ubuntu-latest
     concurrency:
-      group: deploy-ec2-docker
+      group: deploy-asg
       cancel-in-progress: false
     permissions:
       id-token: write
       contents: read
+    env:
+      ASG_NAME: devops-lab-dev-asg
+      TAG_PARAM: /devops-lab-dev/sysdiag/image-tag
+      IMAGE_TAG: ${{ github.sha }}
+      REFRESH_PREFS: '{"MinHealthyPercentage":100,"MaxHealthyPercentage":200}'
 
     steps:
       - name: Configure AWS credentials
@@ -135,45 +88,72 @@ jobs:
           role-to-assume: arn:aws:iam::286590629524:role/github-actions-app-deploy
           aws-region: ap-south-1
 
-      - name: Find the app server
-        id: ec2
+      - name: Read the live image tag
+        id: old
         run: |
-          id=$(aws ec2 describe-instances \
-            --filters "Name=tag:Name,Values=devops-lab-dev-diagnostic" "Name=instance-state-name,Values=running" \
-            --query 'Reservations[0].Instances[0].InstanceId' --output text)
-          if [ "$id" = "None" ]; then
-            echo "No running app server found"
-            exit 1
-          fi
+          tag=$(aws ssm get-parameter --name "$TAG_PARAM" \
+            --query Parameter.Value --output text)
+          echo "Live image tag: $tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Record the new image tag
+        run: |
+          aws ssm put-parameter --name "$TAG_PARAM" --value "$IMAGE_TAG" --overwrite
+
+      - name: Start the instance refresh
+        id: refresh
+        run: |
+          id=$(aws autoscaling start-instance-refresh \
+            --auto-scaling-group-name "$ASG_NAME" \
+            --preferences "$REFRESH_PREFS" \
+            --query InstanceRefreshId --output text)
+          echo "Instance refresh: $id"
           echo "id=$id" >> "$GITHUB_OUTPUT"
 
-      - name: Run deploy-sysdiag-docker on the server
+      - name: Wait for the refresh to finish
         env:
-          INSTANCE_ID: ${{ steps.ec2.outputs.id }}
-          IMAGE_TAG: ${{ github.sha }}
+          REFRESH_ID: ${{ steps.refresh.outputs.id }}
         run: |
-          cid=$(aws ssm send-command \
-            --instance-ids "$INSTANCE_ID" \
-            --document-name AWS-RunShellScript \
-            --comment "docker deploy $IMAGE_TAG" \
-            --parameters "{\"commands\":[\"/usr/local/bin/deploy-sysdiag-docker $IMAGE_TAG\"]}" \
-            --query Command.CommandId --output text)
-          echo "SSM command: $cid"
+          for i in $(seq 1 60); do
+            read -r status pct <<< "$(aws autoscaling describe-instance-refreshes \
+              --auto-scaling-group-name "$ASG_NAME" \
+              --instance-refresh-ids "$REFRESH_ID" \
+              --query 'InstanceRefreshes[0].[Status,PercentageComplete]' --output text)"
+            echo "$(date +%H:%M:%S) $status ${pct}%"
+            case "$status" in
+              Successful) exit 0 ;;
+              Failed|Cancelled|RollbackSuccessful|RollbackFailed) exit 1 ;;
+            esac
+            sleep 30
+          done
+          echo "Refresh did not finish within 30 minutes"
+          exit 1
 
-          aws ssm wait command-executed --command-id "$cid" --instance-id "$INSTANCE_ID" || true
-
-          aws ssm get-command-invocation --command-id "$cid" --instance-id "$INSTANCE_ID" \
-            --query '[Status, StandardOutputContent, StandardErrorContent]' --output text
-
-          status=$(aws ssm get-command-invocation --command-id "$cid" --instance-id "$INSTANCE_ID" \
-            --query Status --output text)
-          [ "$status" = "Success" ]
-
-      - name: Record the live image tag
+      - name: Roll back to the previous image tag
+        if: failure() && steps.old.outputs.tag != ''
         env:
-          IMAGE_TAG: ${{ github.sha }}
+          OLD_TAG: ${{ steps.old.outputs.tag }}
+          REFRESH_ID: ${{ steps.refresh.outputs.id }}
         run: |
-          aws ssm put-parameter \
-            --name /devops-lab-dev/sysdiag/image-tag \
-            --value "$IMAGE_TAG" \
-            --overwrite
+          aws ssm put-parameter --name "$TAG_PARAM" --value "$OLD_TAG" --overwrite
+          echo "Image tag restored to $OLD_TAG"
+
+          # No refresh started means no server was touched
+          [ -z "$REFRESH_ID" ] && exit 0
+
+          # Stop the bad refresh, wait for it to settle, then roll every server back
+          aws autoscaling cancel-instance-refresh --auto-scaling-group-name "$ASG_NAME" || true
+          for i in $(seq 1 40); do
+            status=$(aws autoscaling describe-instance-refreshes \
+              --auto-scaling-group-name "$ASG_NAME" \
+              --instance-refresh-ids "$REFRESH_ID" \
+              --query 'InstanceRefreshes[0].Status' --output text)
+            case "$status" in
+              Pending|InProgress|Cancelling) sleep 15 ;;
+              *) break ;;
+            esac
+          done
+          aws autoscaling start-instance-refresh \
+            --auto-scaling-group-name "$ASG_NAME" \
+            --preferences "$REFRESH_PREFS"
+          echo "Rollback refresh started; servers will return to $OLD_TAG"
