@@ -7,6 +7,7 @@ CPU usage, memory, processes, disk capacity, inode usage, and mounted filesystem
 
 - Python 3.12+
 - uv
+- fastapi
 
 ## Setup
 
